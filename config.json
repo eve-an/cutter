@@ -1,0 +1,14 @@
+{
+  "ballModel": {
+    "path": "src/main/resources/ball_models/best.onnx",
+    "threshold": 0.3,
+    "ignore": false,
+    "imageSize": 640
+  },
+  "occlusionModel": {
+    "path": "src/main/resources/occlusion_models/mobilenetv3_112",
+    "threshold": 0.5,
+    "ignore": true,
+    "imageSize": 112
+  }
+}

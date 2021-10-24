@@ -1,0 +1,6 @@
+target
+.idea
+scores
+updated
+src/main/resources/occlusion_models
+src/main/resources/ball_models
