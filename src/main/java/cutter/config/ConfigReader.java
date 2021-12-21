@@ -25,7 +25,7 @@ public class ConfigReader {
 
     private static Config readConfig() throws IOException {
         Gson gson = new Gson();
-        Reader reader = Files.newBufferedReader(Paths.get("config.json"));
+        Reader reader = Files.newBufferedReader(Paths.get("/home/ivan/git/Cutter/config.json"));
 
         Config config = gson.fromJson(reader, Config.class);
         reader.close();

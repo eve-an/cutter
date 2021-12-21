@@ -1,41 +1,54 @@
 package cutter;
 
 import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
-import cutter.cuts.Cut;
+import cutter.config.GameConfig;
+import cutter.cuts.CutUtil;
+import cutter.cuts.FrameFilter;
+import cutter.cuts.PositionHandler;
 import cutter.cuts.VideoCut;
-import cutter.models.pytorch.PyTorchBallModel;
-import cutter.models.tensorflow.TFOcclusionModel;
-import cutter.scores.BallScore;
 import cutter.scores.Frame;
 import cutter.util.Metrics;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.Writer;
+import java.io.Reader;
 import java.nio.file.Files;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
 import java.util.stream.Collectors;
 
 public class VideoCutter {
 
-    private static final Logger log = LogManager.getLogger(VideoCutter.class);
-    private final List<Video> videos;
-    private final HashMap<Long, List<Frame>> framesMap;
+    private static final Logger log = LoggerFactory.getLogger(VideoCutter.class);
     private Metrics metrics;
-    private long currentPos;
+    private final long minCutLength;
+    private final int frameStep;
+    private final PositionHandler positionHandler;
 
-    private List<VideoCut> cuts = new ArrayList<>();
-    private VideoCut currentCut;
-    private List<Cut> setStates;
+    public VideoCutter(long minCutLength, int frameStep) {
+        this.minCutLength = minCutLength;
+        this.frameStep = frameStep;
+        GameConfig gameConfig = readGameConfig("game_config.json");
+        this.positionHandler = new PositionHandler(gameConfig.getHalftime(), gameConfig.getSetStates());
+    }
 
-    public VideoCutter(List<Video> videos, List<Cut> setStates) {
-        this.videos = videos;
-        this.setStates = setStates;
-        this.framesMap = new HashMap<>();
+    private GameConfig readGameConfig(String jsonPath) {
+        File file = new File(jsonPath);
 
+        Gson gson = new Gson();
+        try (Reader reader = Files.newBufferedReader(file.toPath())) {
+            return gson.fromJson(reader, GameConfig.class);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    // A Map is easier to handle and faster to access
+    private HashMap<Long, List<Frame>> fillFramesMap(List<Video> videos) {
+        HashMap<Long, List<Frame>> framesMap = new HashMap<>();
 
         for (Video video : videos) {
             for (Frame frame : video.getFrames()) {
@@ -43,214 +56,115 @@ public class VideoCutter {
                 framesAtPos.add(frame);
             }
         }
+
+        List<Frame> frameList = framesMap.get(0L);
+        for (Long frame : framesMap.keySet()) {
+            if (frame % frameStep == 0) {
+                frameList = framesMap.get(frame);
+            } else {
+                framesMap.replace(frame, frameList);
+            }
+        }
+
+        return framesMap;
     }
 
 
-    public void generateScores(String outDir) {
-        File outDirFile = createDirectory(outDir);
-        saveFrameScores(outDirFile);
+
+    public List<VideoCut> cut(List<Video> videos) {
+        var cuts = generateCuts(videos);
+        // Throw away Cuts before the game start
+        List<VideoCut> cleaned = cuts.stream()
+                .filter(cut -> cut.getStartFrame() >= 5900)
+                .collect(Collectors.toList());
+
+        var cutCleaner = new CutUtil();
+        cutCleaner.cleanCuts(cleaned, minCutLength);
+
+        cleaned.removeIf(cut -> positionHandler.isInHalftimePause(cut.getEndFrame() - 500));
+
+        return cleaned;
     }
 
-    public List<VideoCut> cut() {
+    private List<VideoCut> generateCuts(List<Video> videos) {
+        HashMap<Long, List<Frame>> framesMap = fillFramesMap(videos);
+        List<VideoCut> cuts = new ArrayList<>();
+        VideoCut currentCut = null;
 
         for (long framePos = 0; framePos < framesMap.size(); framePos++) {
-            currentPos = framePos;
             List<Frame> frames = framesMap.get(framePos);
+            Frame bestFrame = decideForBestFrame(frames);
 
-            if (currentPos > 4305 && currentPos < 14754) {
-                frames = frames.stream().filter(frame -> !frame.isOverview()).collect(Collectors.toList());
-            }
-
-            Frame bestFrame = decideForBestFrame(framePos, frames);
-            if (currentCut != null) {
-                if (bestFrame.getVideoId() == currentCut.getVideoId()) { // Make our cut bigger
-                    currentCut.incrementEndFrame();
-                } else {
-
-                    if (currentCut.getLength() < 30) {
-                        VideoCut lastCut = cuts.get(cuts.size() - 1);
-                        lastCut.setEndFrame(currentCut.getEndFrame());
-                        currentCut = lastCut;
-                    } else {
-                        cuts.add(currentCut);
-                        currentCut = new VideoCut(bestFrame.getVideoId(), framePos, framePos);
-                    }
-                }
-            } else {
+            if (currentCut == null) {
                 currentCut = new VideoCut(bestFrame.getVideoId(), 0, 0);
+            } else if (bestFrame.getVideoId() == currentCut.getVideoId()) { // Make our cut bigger
+                currentCut.incrementEndFrame();
+            } else {
+                cuts.add(currentCut);
+                currentCut = new VideoCut(bestFrame.getVideoId(), framePos, framePos);
             }
         }
 
         return cuts;
     }
 
-    private Frame decideForBestFrame(long framePos, List<Frame> frames) {
-        if (frames.size() == 1) {
-            return frames.get(0);
-        }
+    private Frame decideForBestFrame(List<Frame> frames) {
+        sanityCheck(frames);
 
-        if (framePos == 4698) {
-            System.out.println("");
-        }
+        long framePos = frames.get(0).getGlobalPos();
+        var currentGameState = positionHandler.getCurrentGameState(framePos, 75);
+
+        boolean nearSetState = currentGameState == PositionHandler.GameState.SET_STATE;
+        boolean nearHalftime = currentGameState == PositionHandler.GameState.FIRST_HALFTIME;
 
         Frame bestFrame;
-        if (allVideosObscured((int) framePos)) {
-            bestFrame = frameWithBestBallView(frames);
+        if (frames.size() == 1) {   // Trivial Case
+            bestFrame = frames.get(0);
+        } else if (nearSetState || nearHalftime || FrameFilter.allOcclusion(frames)) { // Prioritize overview cams for set states and halftimes or when every action cam contains occlusion
+            bestFrame = bestOverviewFrame(frames);
         } else {
-            List<Frame> noOcclusion = framesWithoutOcclusion(frames);
-            List<Frame> maybeBall = noOcclusion.stream().filter(Frame::ballIsVisible).collect(Collectors.toList());
+            List<Frame> actionCams = FrameFilter.actionOnly(frames);
 
-            if (maybeBall.isEmpty()) {
-                if (takeFrameWithCurrentId(frames).isPresent()) {
-                    bestFrame = takeFrameWithCurrentId(frames).get();
-                } else {
-                    return takeMostDominantVideo(frames).orElse(frames.get(0));
-                }
+            if (actionCams.isEmpty()) {
+                log.error("Cannot happen!");
+                throw new IllegalStateException("Cannot find suitable frame");
             } else {
-                bestFrame = frameWithBestBallView(noOcclusion);
+                List<Frame> noOcclusion = FrameFilter.withoutOcclusion(actionCams);
+                bestFrame = FrameFilter.bestBallView(noOcclusion); // Best Frame = Action Cam + No Occlusion + max bounding box area
             }
-
         }
 
         return bestFrame;
     }
 
-    private Optional<Frame> takeMostDominantVideo(List<Frame> frames) {
-        int mostRepresentedId = getIdWithMostCuts();
-        return frames.stream().filter(frame -> frame.getVideoId() == mostRepresentedId).findAny();
+    private Frame bestOverviewFrame(List<Frame> frames) {
+        List<Frame> overviewOnly = FrameFilter.overviewOnly(frames);
+        return FrameFilter.bestBallView(overviewOnly);
     }
 
-    private Optional<Frame> takeFrameWithCurrentId(List<Frame> frames) {
-        return frames.stream()
-                .filter(frame -> frame.getVideoId() == currentCut.getVideoId())
-                .findAny();
-    }
+    private void sanityCheck(List<Frame> frames) {
+        String errorMsg = "";
 
-
-    public int getIdWithMostCuts() {
-        Map<Integer, Integer> histogram = new HashMap<>();
-
-        for (VideoCut cut : cuts) {
-            histogram.putIfAbsent(cut.getVideoId(), 1);
-            histogram.computeIfPresent(cut.getVideoId(), (id, occurrences) -> occurrences + 1);
+        if (frames.isEmpty()) {
+            errorMsg += "Frames must not be empty!";
+        } else if (!sameFramePosition(frames)) {
+            errorMsg += "Frames must be at the same global position!";
+        } else {
+            return; // Ok
         }
 
-        int maxId = -1;
-        int maxValue = -1;
-        for (Map.Entry<Integer, Integer> entry : histogram.entrySet()) {
-            if (entry.getValue() > maxValue) {
-                maxId = entry.getKey();
+        log.error(errorMsg + frames);
+        throw new IllegalArgumentException(errorMsg);
+    }
+
+    private boolean sameFramePosition(List<Frame> frames) {
+        Frame frame = frames.get(0);
+        for (Frame other : frames) {
+            if (frame.getGlobalPos() != other.getGlobalPos()) {
+                return false;
             }
         }
 
-        return maxId;
-    }
-
-    public List<Frame> framesWithoutOcclusion(List<Frame> frames) {
-        return frames.stream()
-                .filter(frame -> !frame.containsOcclusion())
-                .collect(Collectors.toList());
-    }
-
-
-    public List<Frame> getFramesAt(int framePos) {
-        return videos.stream()
-                .filter(video -> {
-                    long videoStart = video.getOffset();
-                    long videoEnd = video.getOffset() + video.getLengthInFrames();
-
-                    return framePos >= videoStart && framePos < videoEnd;
-                })
-                .map(video -> video.getFrames().get((int) (framePos - video.getOffset())))
-                .collect(Collectors.toList());
-    }
-
-    public Frame frameWithBestBallView(List<Frame> frames) {
-        Frame bestFrameByScore = frames.stream()
-                .max(Comparator.comparingDouble(frame -> frame.getBallScore().getScore()))
-                .orElseThrow(() -> new IllegalStateException("Could not find maximum ball score: " + frames + " " + currentPos));
-
-        BallScore maxScore = bestFrameByScore.getBallScore();
-        for (Frame frame : frames) {
-            BallScore otherScore = frame.getBallScore();
-            if (maxScore.getScore() - otherScore.getScore() < 0.10 && frame.ballIsVisible()) {
-                if (otherScore.getBbox().getArea() > maxScore.getBbox().getArea()) {
-                    bestFrameByScore = frame;
-                    maxScore = frame.getBallScore();
-                }
-            }
-        }
-
-        return bestFrameByScore;
-    }
-
-    public boolean allVideosObscured(int framePos) { // TODO: Übersichtsvideos entfernen, da die keine Verdeckungen haben!
-        return getFramesAt(framePos).stream()
-                .allMatch(Frame::containsOcclusion);
-    }
-
-    private long getMaxFrame() {
-        return videos.stream()
-                .map(video -> video.getOffset() + video.getLengthInFrames()) // Maximum frame pos of video
-                .max(Long::compareTo)
-                .orElseThrow(() -> new IllegalStateException("Could not determine max frame of videos"));
-    }
-
-    private void saveFrameScores(File outDirFile) {
-        for (Video video : videos) {
-            FrameIterator frameIterator = new FrameIterator(PyTorchBallModel.INSTANCE, TFOcclusionModel.INSTANCE, video);
-            File outFile = new File(outDirFile, video.getVideoFile().getName() + ".json");
-
-            metrics = new Metrics();
-            while (frameIterator.hasNext()) {
-                Frame frame = frameIterator.next();
-                metrics.updateTime();
-                video.add(frame);
-                logProgress(video, outFile, frame);
-            }
-
-            saveFrames(video, outFile);
-        }
-    }
-
-    private File createDirectory(String outDir) {
-        File outDirFile = new File(outDir);
-        if (!outDirFile.exists()) {
-            createDirectory(outDirFile);
-        }
-        return outDirFile;
-    }
-
-    private void createDirectory(File outDirFile) {
-        try {
-            Files.createDirectory(outDirFile.toPath());
-        } catch (IOException e) {
-            log.error("Could not create directory {}", outDirFile);
-            throw new RuntimeException(e);
-        }
-    }
-
-    private void logProgress(Video video, File outFile, Frame frame) {
-        if (frame.getFramePos() % 100 == 0) {
-            saveFrames(video, outFile);
-            log.info("{} - Progress: {}.2f% | Processed {}/{} frames | FPS={}.2f",
-                    video.getVideoFile().getName(),
-                    frame.getFramePos() / (double) video.getLengthInFrames(),
-                    frame.getFramePos(),
-                    video.getLengthInFrames(),
-                    metrics.getFps());
-        }
-    }
-
-
-    private void saveFrames(Video video, File output) {
-        try {
-            Gson gson = new GsonBuilder().setPrettyPrinting().create();
-            Writer writer = Files.newBufferedWriter(output.toPath());
-            gson.toJson(video, writer);
-            writer.close();
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
+        return true;
     }
 }

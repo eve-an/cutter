@@ -15,8 +15,9 @@ public class Video {
     private final long offset;
     private final long lengthInFrames;
     private final File videoFile;
-    private boolean isOverview;
+    private final boolean isOverview;
     private final List<Frame> frames;
+    private List<Long> skipFrames; // These frames can be skipped for prediction because they are the only ones at these positions
 
     public Video(File videoFile, int id, long offset, long lengthInFrames, boolean isOverview) {
         this.videoFile = videoFile;
@@ -25,6 +26,7 @@ public class Video {
         this.lengthInFrames = lengthInFrames;
         this.isOverview = isOverview;
         this.frames = new ArrayList<>();
+        this.skipFrames = new ArrayList<>();
     }
 
 
@@ -32,8 +34,15 @@ public class Video {
         this(videoFile, id, offset, readVideoLength(videoFile.getAbsolutePath()), isOverview);
     }
 
-    public void add(Frame frame) {
+    public void addFrame(Frame frame) {
         this.frames.add(frame);
+    }
+
+    public void addSkipFrame(long skipFrame) {
+        if (skipFrames == null) {
+            skipFrames = new ArrayList<>();
+        }
+        this.skipFrames.add(skipFrame);
     }
 
     public static long readVideoLength(String videoPath) {
@@ -61,6 +70,10 @@ public class Video {
 
     public List<Frame> getFrames() {
         return frames;
+    }
+
+    public List<Long> getSkipFrames() {
+        return skipFrames;
     }
 
     @Override

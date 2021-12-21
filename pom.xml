@@ -4,20 +4,20 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>org.example</groupId>
-    <artifactId>Cutter</artifactId>
+    <groupId>de.ivan</groupId>
+    <artifactId>cutter</artifactId>
     <version>1.0-SNAPSHOT</version>
 
     <properties>
         <maven.compiler.source>11</maven.compiler.source>
         <maven.compiler.target>11</maven.compiler.target>
 
+        <version.logback>1.2.8</version.logback>
         <version.tensorflow>0.3.3</version.tensorflow>
         <version.junit>4.12</version.junit>
         <version.tarso>2.4-1</version.tarso>
-        <version.djl>0.12.0</version.djl>
-        <version.log4j>2.14.1</version.log4j>
-        <version.gson>2.8.8</version.gson>
+        <version.djl>0.13.0</version.djl>
+        <version.gson>2.8.9</version.gson>
         <version.onnx>1.9.0</version.onnx>
         <version.opencv>4.5.1-2</version.opencv>
     </properties>
@@ -37,19 +37,9 @@
 
     <dependencies>
         <dependency>
-            <groupId>org.apache.logging.log4j</groupId>
-            <artifactId>log4j-api</artifactId>
-            <version>${version.log4j}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.logging.log4j</groupId>
-            <artifactId>log4j-core</artifactId>
-            <version>${version.log4j}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.logging.log4j</groupId>
-            <artifactId>log4j-slf4j-impl</artifactId>
-            <version>${version.log4j}</version>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+            <version>${version.logback}</version>
         </dependency>
         <dependency>
             <groupId>com.google.code.gson</groupId>

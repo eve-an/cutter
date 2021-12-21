@@ -19,12 +19,12 @@ import cutter.geometry.MyBoundingBox;
 import cutter.geometry.MyPoint;
 import cutter.models.BallModel;
 import cutter.scores.BallScore;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.opencv.core.Mat;
 import org.opencv.core.Size;
 import org.opencv.highgui.HighGui;
 import org.opencv.imgproc.Imgproc;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.MalformedURLException;
@@ -35,7 +35,7 @@ import java.util.NoSuchElementException;
 public enum PyTorchBallModel implements BallModel {
     INSTANCE;
 
-    private static final Logger log = LogManager.getLogger(PyTorchBallModel.class);
+    private static final Logger log = LoggerFactory.getLogger(PyTorchBallModel.class);
     private ImageFactory imageFactory;
     private ZooModel<Image, DetectedObjects> model;
 
@@ -103,7 +103,7 @@ public enum PyTorchBallModel implements BallModel {
             noBall.setScore(0.0);
             return noBall;
         } catch (Exception e) {
-            log.error(e);
+            log.error(e.getMessage());
             throw new RuntimeException(e);
         }
     }

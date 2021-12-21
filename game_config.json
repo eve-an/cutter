@@ -1,0 +1,29 @@
+{
+  "halftime": {
+    "firstStart": 6270,
+    "firstEnd": 24360,
+    "secondStart": 54097
+  },
+  "setStates": [
+    {
+      "start": 7740,
+      "end": 9450
+    },
+    {
+      "start": 17190,
+      "end": 19200
+    },
+    {
+      "start": 20640,
+      "end": 22500
+    },
+    {
+      "start": 57450,
+      "end": 59672
+    },
+    {
+      "start": 67177,
+      "end": 68270
+    }
+  ]
+}

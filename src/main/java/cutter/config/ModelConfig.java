@@ -19,7 +19,6 @@ public class ModelConfig {
         return path;
     }
 
-
     public double getThreshold() {
         return threshold;
     }

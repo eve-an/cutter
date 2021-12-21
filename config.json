@@ -1,14 +1,15 @@
 {
   "ballModel": {
-    "path": "src/main/resources/ball_models/best.onnx",
+    "path": "/home/ivan/git/ba/models/yolov5/yolov5m_640/weights/last.onnx",
     "threshold": 0.3,
     "ignore": false,
     "imageSize": 640
   },
   "occlusionModel": {
-    "path": "src/main/resources/occlusion_models/mobilenetv3_112",
+    "path": "/home/ivan/git/Cutter/src/main/resources/occlusion_models/mobilenetv3_112",
     "threshold": 0.5,
     "ignore": true,
     "imageSize": 112
-  }
+  },
+  "predictionStep": 1
 }
